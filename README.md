@@ -5,16 +5,10 @@ Text to describe app
 ## Getting Started
 
 I you don't have it already, install Docker.
-
 Then, move to folder you want to work in and clone this repository.
 
 ```
 git clone https://github.com/RiskWave/sme-credit-report.git
-```
-
-Explore the files.
-
-```
 cd sme-credit-report
 ls
 ```
@@ -33,7 +27,7 @@ To run the app locally, we must follow these steps:
 To build the image, navigate to the folder containing the Dockerfile and run the following command.
 
 ```
-docker build -t <image-name> .
+docker build -t sme-credit-report .
 ```
 
 ### Start the Container
@@ -41,7 +35,7 @@ docker build -t <image-name> .
 Wait for the build process to finish, then start the container by running the following.
 
 ```
-docker run -d --rm -p 8000:8000 <image-name>
+docker run -d --rm -p 8000:8000 sme-credit-report
 ```
 
 ### Open the App in the Browser
