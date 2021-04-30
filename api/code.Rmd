@@ -1,0 +1,823 @@
+---
+title: "Financial Report"
+author: "Reporting at 12/2/2020"
+date: ''
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_file= here::here("Output",sprintf('report-%s.html', Sys.time()))) })
+output: rmarkdown::html_document
+params: 
+  company: NA
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning=F, message=F) 
+options(scipen=999)
+```
+
+```{r}
+# ------------
+# 0.0 Styling  -----
+# ------------
+
+# Global colors
+white = "#ffffff"
+blue  = "#b0e1f7"
+green = "#71CA97"
+red = "#ff7f7f"
+
+# Style delta columns with icon 
+formattable::formatter("span", 
+  style = x ~ style(font.weight = "italic", 
+                    color = ifelse(x > 0, green, 
+                              ifelse(x < 0, red, "black"))), 
+  x ~ icontext(ifelse(x>0, "arrow-up", "arrow-down"), x)) -> improvement_formatter
+
+# Style delta columns no icon 
+formattable::formatter("span", 
+  style = x ~ style(font.weight = "italic", 
+  color = ifelse(x > 0, green, 
+  ifelse(x < 0, red, "black")))) -> improvement_formatter_nosign
+
+# Create a vectorized (horizontal) spark lines
+sparky <- Vectorize(sparkline::spk_chr)
+```
+
+```{r}
+# ---------------
+# 1.0 Get data
+# ---------------
+
+# Imagine this is the URL or ID of a Sheet readable by anyone (with a link)
+ss <- here::here("data","Template.xlsx")
+
+# Import data
+info <- read_excel(ss, sheet = "COMPANY-DETAILS") %>% rename_all(tolower) %>% as.data.frame()
+sh <- read_excel(ss, sheet = "SH", trim_ws = T) %>% rename_all(tolower) %>% as.data.frame()
+pl <- read_excel(ss, sheet = "PL", trim_ws = T) %>% rename_all(tolower) %>% as.data.frame()   
+bs <- read_excel(ss, sheet = "BS", trim_ws = T) %>% rename_all(tolower) %>% as.data.frame()     
+ratios <- read_excel(ss, sheet = "RATIOS", trim_ws = T) %>% rename_all(tolower) %>% as.data.frame() 
+
+```
+
+```{r}
+# -------------------
+# 2.0 Company Details  -----
+# -------------------
+info = info %>% filter(company_id==params$company)
+```
+
+
+<br/><br/>
+
+- ***[Company Name]:*** `r info[[1,1]]`
+
+- ***Established Year:***	`r info[[1,3]]`
+
+- ***Company Type:***	`r info[[2,3]]`
+
+- ***Number of Employees:***	`r info[[3,3]]`
+
+- ***ISIC_Rev4:***	`r info[[4,3]]`
+
+
+<br/><br/>
+
+
+## Shareholders
+
+<br/><br/>
+
+
+
+```{r}
+# ----------------
+# 3.0 Shareholder  -----
+# ----------------
+## TODO: find a regex or smth if there are different/more years
+
+# Tidy table
+sh_tbl <- sh %>% 
+          filter(company_id == params$company) %>% 
+          mutate(reporting_date = year(reporting_date)) %>% 
+          group_by(reporting_date) %>% 
+          select(-company_id) %>% 
+          pivot_wider(names_from = reporting_date, values_from = shareholder_quote) %>%
+          as.data.frame()
+
+# Format style
+sh_tbl$`2018` = round(sh_tbl$`2018`,2)
+sh_tbl$`2019` = round(sh_tbl$`2019`,2)
+sh_tbl$`2020` = round(sh_tbl$`2020`,2)
+
+# Remove _ in columns names 
+colnames(sh_tbl) = gsub("_"," ", colnames(sh_tbl))
+
+# Calculate trend
+sh_tbl$Trend <- apply(sh_tbl[,names(sh_tbl)[2:ncol(sh_tbl)]], 1, paste, collapse = "-")
+
+# Plot table (note that shiny.tag object doesn't work)
+sh_tbl %>%
+    mutate(Trend = sparky(strsplit(Trend, split="-"), type = "line", elementId = `2018`)) %>%
+    formattable::format_table(align=c("l", rep("c", ncol(sh_tbl)-1)),
+                list(
+                  `shareholder name` = formatter("span", style = ~ style(color = "grey", font.weight = "italic")),
+                  `2018`= color_tile(white, blue),
+                  `2019`= color_tile(white, blue),
+                  `2020`= color_tile(white, blue)))  %>%
+      htmltools::HTML() %>%
+      shiny::div() %>%
+      sparkline::spk_add_deps()
+```
+
+<br/><br/>
+
+```{r}
+# * Pie charts ----
+
+# Get charts
+hc1 <- sh_tbl %>%
+  hchart(
+    "pie", hcaes(x = `shareholder name` , y = `2018`),
+    name = "Shareholder Name"
+    )  %>% hc_title(
+    text = "<i>2018</i>",
+    margin = 20,
+    align = "left",
+    style = list(color = "#22A884", useHTML = TRUE)
+    )
+
+hc2 <- sh_tbl %>%
+  highcharter::hchart(
+    "pie", hcaes(x = `shareholder name` , y = `2019`),
+    name = "Shareholder Name"
+    ) %>% hc_title(
+    text = "<i>2019</i>",
+    margin = 20,
+    align = "left",
+    style = list(color = "#22A884", useHTML = TRUE)
+    )
+
+hc3 <- sh_tbl %>%
+  highcharter::hchart(
+    "pie", hcaes(x = `shareholder name` , y = `2020`),
+    name = "Shareholder Name"
+    )%>% hc_title(
+    text = "<i>2020</i>",
+    margin = 20,
+    align = "left",
+    style = list(color = "#22A884", useHTML = TRUE)
+    )
+
+# Display in one grid
+hw_grid(hc1,hc2,hc3, ncol=3, rowheight = 250)
+
+```
+
+<br/><br/>
+
+## Income Statement  
+
+<br/><br/>
+
+```{r}
+# -------------------
+#   Income Statement ---- 
+# -------------------
+
+# Tidy table
+pl_tbl <- pl %>%
+          filter(company_id == params$company) %>%
+          mutate(reporting_date = year(reporting_date)) %>%
+          group_by(reporting_date) %>%
+          select(-company_id, -id, -group) %>%
+          pivot_wider(names_from = reporting_date, values_from = value) %>%
+          as.data.frame()
+
+# Calculate delta diff
+pl_tbl = pl_tbl[, c("category","2018","2019","2020")]
+pl_tbl$`Δ 2020` =  paste0(comma(round(pl_tbl$`2020` - pl_tbl$`2019`,2)), "€")
+pl_tbl$`Δ 2020 %` = paste0(round((pl_tbl$`2020` - pl_tbl$`2019`)/pl_tbl$`2019`,2),"%")
+
+# Format style
+pl_tbl$`2018` = comma(pl_tbl$`2018`)
+pl_tbl$`2019` = comma(pl_tbl$`2019`)
+pl_tbl$`2020` = comma(pl_tbl$`2020`)
+
+# Extract important value that will be bold 
+important_indexes = c("Net sales","Gross margin","Operating income", "Income before taxes","Net income")
+important_values_2018 = pl_tbl[c(1,3,6,12),2]
+important_values_2019 = pl_tbl[c(1,3,6,12),3]
+important_values_2020 = pl_tbl[c(1,3,6,12),4]
+
+# Calculate trend 
+pl_tbl$Trend =  apply(pl_tbl[,names(pl_tbl)[2:3]], 1, paste, collapse = "-")
+
+# Rename
+names(pl_tbl)[names(pl_tbl)=="category"] = 'Category'
+names(pl_tbl)[names(pl_tbl)=="trend"] = 'Trend'
+
+# Order
+pl_tbl = pl_tbl[,c("Category","2018","2019","2020","Trend", "Δ 2020", "Δ 2020 %")]
+
+# Table
+pl_tbl %>%
+    mutate(Trend = sparky(strsplit(Trend, split="-"), type = "line", elementId = `2018`)) %>%
+      formattable::format_table(
+            align=c("l","c","c","c","c","r","r"),
+            list(
+                `Category` = formatter("span",
+                      style = x ~ style("font.weight" = ifelse(x %in% important_indexes, "bold", NA),
+                                        "color" = ifelse(x %in% important_indexes, "grey", "darkgrey"))),
+                
+                `2018` = formatter("span",
+                      style = x ~ style("font.weight" = ifelse(x %in% important_values_2018 , "bold", NA),
+                                        "color" = ifelse(x %in% important_values_2018 , "grey", "darkgrey"))),
+
+                `2019` = formatter("span",
+                      style = x ~ style("font.weight" = ifelse(x %in% important_values_2019 , "bold", NA),
+                                        "color" = ifelse(x %in% important_values_2019 , "grey", "darkgrey"))),
+
+                `2020` = formatter("span",
+                      style = x ~ style("font.weight" = ifelse(x %in% important_values_2020 , "bold", NA),
+                                        "color" = ifelse(x %in% important_values_2020, "grey", "darkgrey"))),
+
+                `Δ 2020` = improvement_formatter_nosign,
+
+                `Δ 2020 %` = improvement_formatter
+            )) %>%
+      htmltools::HTML() %>%
+      shiny::div() %>%
+      sparkline::spk_add_deps()
+
+```
+
+<br/><br/>
+
+## Balance Sheet
+
+<br/><br/>
+
+```{r}
+# ----------------
+#   Balance Sheet   ---- 
+# ----------------
+
+# Tidy table
+bs_tbl <- bs %>%
+          filter(company_id == params$company) %>%
+          mutate(reporting_date = year(reporting_date)) %>%
+          group_by(reporting_date) %>%
+          select(-company_id, -id) %>%
+          pivot_wider(names_from = reporting_date, values_from = value)%>%
+          as.data.frame()
+
+# reorder
+bs_tbl = bs_tbl[, c("group","category","2019","2020")]
+
+# Format style
+bs_tbl$`2020` = comma(bs_tbl$`2020`)
+bs_tbl$`2019` = comma(bs_tbl$`2019`)
+
+# Extract important value that will be bold 
+important_indexes = c("Total Current Assets","Total Long Term Assets","Total Current Liabilities", "Total Long Term Liabilities")
+important_values_2019 = bs_tbl[c(5,9,16,20),3]
+important_values_2020 = bs_tbl[c(5,9,16,20),4]
+
+important_indexes_bold = c("Total Assets","Total Liabilities & Shareholder's Equity")
+important_values_2019_bold = bs_tbl[c(10,25),3]
+important_values_2020_bold = bs_tbl[c(10,25),4]
+
+# Order
+bs_tbl = bs_tbl[,c("group", "category","2019","2020")]
+
+# Rename
+names(bs_tbl)[names(bs_tbl)=="group"] = 'Group'
+names(bs_tbl)[names(bs_tbl)=="category"] = 'Category'
+
+
+# Table
+bs_tbl %>%
+  formattable::format_table(
+             align=c("l", "l","c","c"),
+            list(
+                `Group` = formatter("span", style = ~ style(color = "grey", font.weight = "italic")),
+                `Category` = formatter("span",
+                           style =  x ~ style("font.weight" = ifelse(x %in% important_indexes, "bold",
+                                                                ifelse(x %in% important_indexes_bold, "bold", NA)),
+                                              "color" = ifelse(x %in% important_indexes, "grey",
+                                                          ifelse(x %in% important_indexes_bold, "black", "darkgrey")))),
+
+                `2019` = formatter("span",
+                      style = x ~ style("font.weight" = ifelse(x %in% c(important_values_2019,important_values_2019_bold), "bold", NA),
+                                        "color" = ifelse(x %in% important_values_2019 , "grey",
+                                                          ifelse(x %in% important_values_2019_bold, "black", "darkgrey")))),
+
+                `2020` = formatter("span",
+                      style = x ~ style("font.weight" = ifelse(x %in% c(important_values_2020,important_values_2020_bold), "bold", NA),
+                                        "color" = ifelse(x %in% important_values_2020, "grey",
+                                                          ifelse(x %in% important_values_2020_bold, "black", "darkgrey"))))
+
+            ))
+
+```
+
+<br/><br/>
+
+```{r}
+# * Stacked bar charts ----
+
+# Pick up categories to display 
+vars = c("Total Current Assets",
+         "Total Long Term Assets",
+         "Total Current Liabilities",
+         "Total Long Term Liabilities",
+         "Retained Earnings")
+
+# Filter by categories
+bs_filtered = bs %>% filter(company_id==params$company)
+bs_barchart = bs_filtered[bs_filtered$category%in%vars, names(bs_filtered)%in%c("reporting_date","category","value")] %>% as.data.frame()
+
+# Tidy data
+bs_barchart = bs_barchart %>% 
+              pivot_wider(names_from = category, values_from=value) %>%
+              arrange(year(reporting_date)) %>% 
+              as.data.frame()
+
+# Retained Earnings
+bs_barchart$sign = ifelse(bs_barchart$`Retained Earnings`>0, "+","-")
+
+# Prepare plot
+highchart() %>% 
+  hc_chart(type="column") %>% 
+  hc_plotOptions(column = list(stacking = "normal")) %>%
+  hc_xAxis(categories = year(bs_barchart$reporting_date)) %>%               #define group here 
+  hc_add_series(name="Total Current Assets",
+               data = bs_barchart$`Total Current Assets`,
+               stack = "Assets") %>%
+  hc_add_series(name="Total Long Term Assets",
+               data = bs_barchart$`Total Long Term Assets`,
+               stack = "Assets") %>%
+  hc_add_series(name="Total Current Liabilities",
+               data = bs_barchart$`Total Current Liabilities`,
+               stack = "Liabilities") %>%
+  hc_add_series(name="Total Long Term Liabilities",
+               data = ifelse(bs_barchart$sign == "+", bs_barchart$`Total Long Term Liabilities`,
+                             bs_barchart$`Total Long Term Liabilities` +  bs_barchart$`Retained Earnings`),
+               stack = "Liabilities") %>%
+  hc_add_series(name="Retained Earnings",
+               data = bs_barchart$`Retained Earnings`,
+               stack = "Liabilities") %>% 
+  hc_legend(layout= 'horizontal',
+            align= 'center',
+            verticalAlign= 'bottom',
+            floating= F) %>% 
+  hc_colors(c("#4d9900", "#9fdf9f","#4d1933", "#bf4080", "#ecc6d9"))
+```
+
+<br/><br/>
+
+```{r}
+# * Plot structure asset and liabilities ----
+
+# ** Asset ----
+vars = c("Total Current Assets",
+         "Total Long Term Assets")
+
+# Tidy table
+bs_asset_structure = bs_filtered[bs_filtered$category%in%vars, names(bs_filtered)%in%c("reporting_date","category","value")] %>% as.data.frame()
+bs_asset_structure = bs_asset_structure %>% pivot_wider(names_from = category,values_from=value) %>% as.data.frame()
+bs_asset_structure$reporting_date = as.factor(bs_asset_structure$reporting_date)
+bs_asset_structure$`Total Current Assets` = bs_asset_structure$`Total Current Assets`/1000
+bs_asset_structure$`Total Long Term Assets` = bs_asset_structure$`Total Long Term Assets`/1000
+bs_asset_structure = bs_asset_structure %>% 
+                       mutate(reporting_date = as.factor(year(reporting_date))) %>% 
+                       arrange(reporting_date)
+
+# Plot
+asset_structure = bs_asset_structure %>% 
+                    e_charts(reporting_date) %>% 
+                    e_area(`Total Current Assets`) %>% 
+                    e_area(`Total Long Term Assets`) %>% 
+                    e_tooltip() %>% 
+                    e_title("Assets", "Assets Structure") %>% 
+                    e_theme("mint") %>% 
+                    e_legend(
+                            orient = 'horizontal', 
+                            left = 175, 
+                            top = 0
+                            ) %>% 
+                   e_format_y_axis(suffix = "k") 
+
+# ** Liabilities ----
+vars = c("Total Current Liabilities",
+         "Total Long Term Liabilities")
+
+# Tidy table
+bs_liabilities_structure = bs_filtered[bs_filtered$category%in%vars, names(bs_filtered)%in%c("reporting_date","category","value")] %>% as.data.frame()
+bs_liabilities_structure = bs_liabilities_structure %>% pivot_wider(names_from = category,values_from=value) %>% as.data.frame()
+bs_liabilities_structure$reporting_date = as.factor(bs_liabilities_structure$reporting_date)
+bs_liabilities_structure$`Total Current Liabilities` = bs_liabilities_structure$`Total Current Liabilities`/1000
+bs_liabilities_structure$`Total Long Term Liabilities` = bs_liabilities_structure$`Total Long Term Liabilities`/1000
+bs_liabilities_structure = bs_liabilities_structure %>% 
+                            mutate(reporting_date = as.factor(year(reporting_date))) %>% 
+                            arrange(reporting_date)
+
+# Plot
+liabilities_structure = bs_liabilities_structure %>% 
+                          e_charts(reporting_date) %>% 
+                          e_area(`Total Current Liabilities`) %>% 
+                          e_area(`Total Long Term Liabilities`) %>% 
+                          e_tooltip() %>% 
+                          e_title("Liabilities", "Liabilities Structure") %>% 
+                          e_theme("sakura") %>% 
+                          e_legend(
+                                  orient = 'horizontal', 
+                                  left = 175, 
+                                  top = 0
+                                  ) %>% 
+                          e_format_y_axis(suffix = "k") 
+              
+e_arrange(asset_structure, liabilities_structure, cols=2)
+```
+
+<br/><br/>
+
+```{r}
+# * Plot pie chart breakdown asset ----
+
+ec_asset_current = bs_tbl[1:4,] %>% 
+                     e_charts(`Category`) %>% 
+                     e_pie(`2020`, radius = c("25%", "43%")) %>% 
+                     e_title("Asset Current", "Breakdown 2020") %>% 
+                     e_tooltip() %>% 
+                     e_legend(show=F, type="scroll")
+
+ec_asset_fixed= bs_tbl[6:8,] %>% 
+                     e_charts(`Category`) %>% 
+                     e_pie(`2020`, radius = c("25%", "43%")) %>% 
+                     e_title("Asset Fixed", "Breakdown 2020") %>% 
+                     e_tooltip() %>% 
+                     e_legend(show=F, type="scroll")
+
+e_arrange(ec_asset_current, ec_asset_fixed,rows = 1, cols = 2)
+
+```
+
+<br/><br/>
+
+```{r}
+# * Plot pie chart breakdown liabilites ----
+
+ec_liabilities_current = bs_tbl[11:15,] %>% 
+                   e_charts(`Category`) %>% 
+                   e_pie(`2020`, radius = c("25%", "43%")) %>% 
+                   e_title("Liabilities Current", "Breakdown 2020") %>% 
+                   e_tooltip() %>% 
+                   e_legend(show=F, type="scroll")
+
+ec_liabilities_fixed = bs_tbl[17:19,] %>% 
+                         e_charts(`Category`) %>% 
+                         e_pie(`2020`, radius = c("25%", "43%")) %>% 
+                         e_title("Liabilities Fixed", "Breakdown 2020") %>% 
+                         e_tooltip() %>% 
+                         e_legend(show=F, type="scroll")
+
+e_arrange(ec_liabilities_current, ec_liabilities_fixed, rows = 1, cols = 2)
+```
+
+<br/><br/>
+
+## Selected Financial Indicators
+
+<br/><br/>
+
+
+```{r}
+# ---------------------------
+#  Industry Sector Benchmark  ---- 
+# ---------------------------
+## TODO: Import sheet 1 in db and filter by sector.
+##       Input must be equal.
+##       Ratios and Benchmark are rand. 
+##       I need to calculate each ratio i want based on input values.
+
+# Pick up variables to compare for that particular company and do some manipulation
+vars = c("years_in_business",
+         "num_employees",
+         "turnover_yoy",
+         "ebitda_yoy",
+         "debt_ratio")
+
+# Order & Filter
+ratios_tbl = ratios[ratios$`var name`%in%vars, c("var name","value","sector_average","sector_minimum","sector_maximum") ]
+names(ratios_tbl) = c("index","value","sector_average","sector_minimum","sector_maximum" )
+
+# add difference with average 
+ratios_tbl$value = as.numeric(ratios_tbl$value)
+ratios_tbl$difference = ratios_tbl$value - ratios_tbl$sector_average
+ratios_tbl$company_id = c(rep(1,5), rep(2,5), rep(3,5))
+ratios_tbl$industry_sector = c(rep(info[[4,3]],5),
+                               rep(info[[4,3]],5),
+                               rep(info[[4,3]],5))
+
+# set order 
+ratios_tbl = ratios_tbl[,c("company_id","industry_sector","index","sector_minimum","sector_maximum","sector_average","value","difference")]
+
+# pretty cols name on table
+names(ratios_tbl) = c("Company Id", "Industry Sector", "Index", "Sector Minimum", "Sector Maximum", "Sector Average","Value","Difference")
+
+# filter by params
+ratios_tbl = ratios_tbl %>% filter(`Company Id`==params$company) %>% select(-`Company Id`)
+
+# pretty index name on table
+ratios_tbl$Index = c("Years in Business", "Number of Employees","Turnover YoY", "Ebitda YoY", "Debt Ratio")
+
+# round
+ratios_tbl$Value = round(ratios_tbl$Value, 2)
+ratios_tbl$Difference = round(ratios_tbl$Difference,2)
+
+# Copy data that will be used to produce spider plot
+ratios_plot = ratios_tbl
+
+# Transform into percentanges
+ratios_tbl[c(3,4,5), c(3:7)] = ratios_tbl[c(3,4,5), c(3:7)] * 100
+
+# add percentages for other indexes
+ratios_tbl$`Sector Minimum`[c(3,4,5)]  = paste0(ratios_tbl$`Sector Minimum`[c(3,4,5)], "%")
+ratios_tbl$`Sector Average`[c(3,4,5)]  = paste0(ratios_tbl$`Sector Average`[c(3,4,5)], "%")
+ratios_tbl$`Sector Maximum`[c(3,4,5)]  = paste0(ratios_tbl$`Sector Maximum`[c(3,4,5)], "%")
+ratios_tbl$Value[c(3,4,5)]  = paste0(ratios_tbl$Value[c(3,4,5)], "%")
+ratios_tbl$Difference[c(3,4,5)]  = paste0(ratios_tbl$Difference[c(3,4,5)], "%")
+
+# Note: Not necessary to specify columns name with the correct name
+ratios_tbl %>%
+  formattable::format_table(
+            align =c("l","l","l","c","c","c","c","r"),
+            list(
+            `Index` = formatter("span", style = ~ style(color = "grey",font.weight = "bold")),
+            `Group` = formatter("span", style = ~ style(color = "darkgrey",font.weight = "italic")),
+            `Industry Sector` = formatter("span", style = ~ style(color = "darkgrey",
+                                                                  font.weight = "italic")),
+            `Value` = formatter("span", style = ~ style(color = "grey",
+                                                                  font.weight = "italic")),
+            `Sector Minimum` = formatter("span", style = ~ style(color = "grey",
+                                                                  font.weight = "italic")),
+            `Sector Maximum` = formatter("span", style = ~ style(color = "grey",
+                                                      font.weight = "italic")),
+            `Sector Average` = formatter("span", style = ~ style(color = "grey",
+                                            font.weight = "italic")),
+            `Difference` = improvement_formatter)
+              )
+```
+
+
+<br/><br/>
+
+```{r}
+# * Spider Chart ----
+ratios_plot = ratios_plot[,c("Index","Value","Sector Average","Sector Minimum","Sector Maximum")]
+
+# Normalize to put all variables in same scale
+for(i in 1:nrow(ratios_plot)){
+    ratios_plot$value_n[i] = (ratios_plot[i,]$Value - ratios_plot[i,]$`Sector Minimum`) / (ratios_plot[i,]$`Sector Maximum` - ratios_plot[i,]$`Sector Minimum`)
+    ratios_plot$value_benchmark_n[i] = (ratios_plot[i,]$`Sector Average` - ratios_plot[i,]$`Sector Minimum`) / (ratios_plot[i,]$`Sector Maximum` - ratios_plot[i,]$`Sector Minimum`)
+}
+
+ratios_plot$value_n = round(ratios_plot$value_n,3)
+ratios_plot$value_benchmark_n = round(ratios_plot$value_benchmark_n,3)
+
+ratios_plot %>%
+  e_charts(Index) %>%
+  e_radar(value_n, max=1,name = "Company") %>%
+  e_radar(value_benchmark_n,max=1, name = "Industry Sector") %>%
+  e_tooltip(trigger = "item") %>%
+  e_title("Company vs Industry","Radar Chart: values in %")
+```
+
+
+<br/><br/>
+
+## Transactions
+
+```{r}
+load(here::here("data","card_transaction_one_account.rdata"))
+transaction_card = data.frame(x) 
+
+# 1.a Text
+# 1.b Descriptive table
+transaction_card$timestamp = as.Date(sub("T.*","", transaction_card$timestamp))
+
+transaction_tbl = transaction_card %>% 
+                    mutate(`Start Date` = min(timestamp),
+                           `End Date` = max(timestamp),
+                           `Total Days` = difftime(`End Date`,`Start Date`),
+                           `Min Balance` = min(running_balance$amount),
+                           `Max Balance` = max(running_balance$amount),
+                           `Avg Balance` = mean(running_balance$amount)) %>% 
+                   select(`Start Date`, `End Date`, `Total Days`, `Min Balance`, `Max Balance`, `Avg Balance`) %>% 
+                   distinct()
+
+transaction_tbl %>%
+  formattable::format_table(
+            align =c("c","c","c","c","c","c"),
+            list(
+            `Start Date` = formatter("span", style = ~ style(color = "grey",font.weight = "italic")),
+            `End Date` = formatter("span", style = ~ style(color = "darkgrey",font.weight = "italic")),
+            `Total Days` = formatter("span", style = ~ style(color = "darkgrey",
+                                                                  font.weight = "italic")),
+            `Min Amount` = formatter("span", style = ~ style(color = "grey",
+                                                                  font.weight = "italic")),
+            `Max Amount` = formatter("span", style = ~ style(color = "grey",
+                                                                  font.weight = "italic")),
+            `Avg Amount` = formatter("span", style = ~ style(color = "grey",
+                                                      font.weight = "italic"))
+              ))
+
+# 2. Timestamp / balance
+plot2 = transaction_card %>% 
+    group_by(timestamp) %>% 
+    mutate(Balance = mean(running_balance$amount),
+           mutate = as.factor(timestamp)) %>% 
+    distinct(timestamp, .keep_all=TRUE) %>% 
+    select(timestamp, Balance) %>% 
+    arrange(timestamp) 
+
+plot2 %>%  
+  hchart('line', hcaes(x = 'timestamp', y = 'Balance')) %>% 
+  hc_yAxis(title=list(text = "Balance")) %>% 
+  hc_xAxis(title=list(text = "")) %>% 
+  hc_title(
+  text = "Balance over time",
+  margin = 20,
+  align = "center",
+  style = list(color = "#00000", useHTML = TRUE)
+  )
+
+# 3. Bar plot positive or negative each day 
+plot2 %>%  
+  e_charts(timestamp) %>% 
+   e_datazoom(
+    type = "slider", 
+    toolbox = FALSE,
+    bottom = -5
+  ) %>% 
+  e_bar(Balance, name = "Serie 1") %>% 
+  e_title("Balance over time") 
+
+# 4. Stacked bar chart per transaction category over time 
+plot3 = transaction_card %>% 
+        group_by(timestamp, transaction_category) %>% 
+        mutate(amount = sum(amount)) %>% 
+        distinct(timestamp, .keep_all=TRUE) %>% 
+        select(timestamp, amount) %>% 
+        arrange(timestamp) %>% 
+        pivot_wider(names_from = transaction_category, values_from = amount)
+
+plot3 %>% 
+  e_charts(timestamp) %>% 
+  e_bar(TRANSFER, stack = "grp") %>% 
+  e_bar(ATM, stack = "grp") %>% 
+  e_bar(BILL_PAYMENT, stack = "grp") %>% 
+  e_bar(PURCHASE, stack = "grp") %>% 
+  e_bar(CREDIT, stack = "grp") %>%
+  e_bar(CASH, stack = "grp") 
+
+# 5.a Radar plot by category
+
+
+# 5.b Table by category 
+
+```
+
+
+<br/><br/>
+
+
+## Credit Risk Score
+
+```{r}
+pl_wide =  pl %>%
+            select(-group, -category) %>%
+            pivot_wider(names_from = id, values_from = value) %>%
+            select(company_id, reporting_date, everything()) %>%
+            as.data.frame()
+
+bs_wide =  bs %>%
+            select(-group, -category) %>%
+            pivot_wider(names_from = id, values_from = value) %>%
+            select(company_id, reporting_date, everything()) %>%
+            as.data.frame()
+
+# filter by company
+pl_wide = pl_wide %>% filter(company_id==params$company) %>% filter(str_detect(reporting_date, '2019|2020'))
+bs_wide = bs_wide %>% filter(company_id==params$company) %>% filter(str_detect(reporting_date, '2019|2020'))
+
+# PL---
+# Basic ratios
+turnover = pl_wide$PL01[1]
+turnover_yoy = pl_wide$PL01[1]/pl_wide$PL01[2] -1
+gross_margin_yoy = pl_wide$PL03[1]/pl_wide$PL03[2] -1
+ebitda_yoy = pl_wide$PL06[1]/pl_wide$PL06[2] -1
+net_profit_yoy = pl_wide$PL12[1]/pl_wide$PL12[2] -1
+
+# Profitability ratios
+roi = pl_wide$PL12[1] / (bs_wide$BSA10[1] - bs_wide$BSL11[1]) - 1
+roce = pl_wide$PL06[1] / bs_wide$BSL11[1] -1
+gross_margin = pl_wide$PL03[1] / pl_wide$PL01[1] -1
+operating_margin = pl_wide$PL06[1] / pl_wide$PL01[1] - 1
+return_on_assets = pl_wide$PL12[1] / bs_wide$BSA10[1] - 1
+return_on_sales  = pl_wide$PL12[1] / pl_wide$PL01[1] - 1
+
+# Liquidity
+working_capital = bs_wide$BSA05[1] / bs_wide$BSL06[1]
+acid_test = bs_wide$BSA05[1] - (bs_wide$BSA06[1] + bs_wide$BSA07[1]) / bs_wide$BSA06[1]
+cash_ratio = bs_wide$BSA01[1] / bs_wide$BSA06[1]
+operating_cashflow_ratio =  pl_wide$PL06[1] / bs_wide$BSA06[1]
+
+
+# Efficiency
+collection_period_CY = bs_wide$BSA02[1] * 365 / pl_wide$PL01[1]
+collection_period_PY = bs_wide$BSA02[2] * 365 / pl_wide$PL01[1]
+collection_period_YoY = collection_period_CY - collection_period_PY - 1
+inventory_period_CY =  bs_wide$BSA04[1] / (pl_wide$PL02[1] / 365)
+inventory_period_PY = bs_wide$BSA04[2] / (pl_wide$PL02[2] / 365)
+inventory_period_YoY = inventory_period_CY / inventory_period_PY - 1
+credit_period_CY  =  bs_wide$BSL01[1] / (pl_wide$PL02[1] / 365)
+credit_period_PY  =  bs_wide$BSL01[2] / (pl_wide$PL02[2] / 365)
+credit_period_YoY = credit_period_CY / credit_period_PY - 1
+cash_cycle_CY = collection_period_CY + inventory_period_CY - credit_period_CY
+cash_cycle_PY = collection_period_PY + inventory_period_PY - credit_period_PY
+cash_cycle_YoY = cash_cycle_CY / cash_cycle_PY - 1
+
+# Capital structure
+debt_ratio = (bs_wide$BSA03[1] + bs_wide$BSA07[1]) / pl_wide$PL06[1]
+debt_ratio1 = (bs_wide$BSA03[1] + bs_wide$BSA07[1]) / pl_wide$PL06[1]
+net_debt_ratio = (bs_wide$BSA03[1] + bs_wide$BSA07[1] - bs_wide$BSA01[1]) / pl_wide$PL06[1]
+debt_to_assets_ratio = bs_wide$BSL11[1] / bs_wide$BSA10[1]
+debt_to_equity_ratio = bs_wide$BSL11[1] / (bs_wide$BSA10[1] - bs_wide$BSL11[1]) - 1
+asset_over_turnover_ratio = turnover / bs_wide$BSA10[1]
+interest_cover_ratio = (pl_wide$PL06[1] - 1883) / 37661
+
+
+params_df = data.frame(turnover,
+                    turnover_yoy,
+                    gross_margin_yoy,
+                    ebitda_yoy,
+                    net_profit_yoy,
+                    roi,
+                    roce,
+                    gross_margin,
+                    operating_margin,
+                    return_on_assets,
+                    return_on_sales,
+                    working_capital,
+                    acid_test,
+                    cash_ratio,
+                    operating_cashflow_ratio,
+                    collection_period_CY,
+                    collection_period_PY,
+                    collection_period_YoY,
+                    inventory_period_CY,
+                    inventory_period_PY,
+                    inventory_period_YoY,
+                    credit_period_CY,
+                    credit_period_PY,
+                    credit_period_YoY,
+                    cash_cycle_CY,
+                    cash_cycle_PY,
+                    cash_cycle_YoY,
+                    debt_ratio,
+                    debt_ratio1,
+                    net_debt_ratio,
+                    debt_to_assets_ratio,
+                    debt_to_equity_ratio,
+                    asset_over_turnover_ratio,
+                    interest_cover_ratio)
+
+#base_url =  "http://localhost:8010/v1/predict?"   #"https://score.riskwave.cloud/api/v1/predict?"
+#parameters = paste(paste0(names(params_df), "=", params_df), collapse = "&")
+#query = paste0(base_url, parameters, collaspe="")
+#request = GET(url=query)
+#response = content(request, as = "text", encoding = "UTF-8")
+#prob = fromJSON(response, flatten = TRUE)
+
+# fake prob 
+prob = 0.033875417333881115
+
+e_charts() %>%
+  e_gauge(round(prob[[1]] * 100,2), "Score",
+          axisLine = list(
+            lineStyle = list(
+                color = list(
+                    c(.2, "#69B34C"),
+                    c(.4, "#FAB733"),
+                    c(.8, "#FF4E11"),
+                    c(1, "#FF0D0D")
+                )
+              )
+          )
+        ) %>%
+  e_title("Score based on in-house algorithm")
+```
