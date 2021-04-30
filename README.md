@@ -1,4 +1,4 @@
-# Data Quality App
+# SME Credit Report
 
 Text to describe app 
 
@@ -9,13 +9,13 @@ I you don't have it already, install Docker.
 Then, move to folder you want to work in and clone this repository.
 
 ```
-git clone https://github.com/RiskWave/SME-credit-report.git
+git clone https://github.com/RiskWave/sme-credit-report.git
 ```
 
 Explore the files.
 
 ```
-cd SME-credit-report
+cd sme-credit-report
 ls
 ```
 Note that there is a `Dockerfile` which contains all the instructions to build an image of the R Shiny server and our app.
@@ -46,4 +46,10 @@ docker run -d --rm -p 8000:8000 <image-name>
 
 ### Open the App in the Browser
 
-Open your web browser and go to http://localhost:3838/. The app 'Data Quality' is displayed.
+Open your web browser and go to
+
+```
+http://localhost:8000/report?company=1
+http://localhost:8000/report?company=2
+http://localhost:8000/report?company=3
+```
