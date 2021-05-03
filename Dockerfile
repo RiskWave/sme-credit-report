@@ -12,10 +12,7 @@ RUN apt-get update && \
   libxml2-dev
  
 ## copy necessary files
-# api folder
-COPY /api ./api
-# renv.lock file
-COPY /api/renv.lock ./renv.lock
+COPY . .
 
 ENV RENV_VERSION 0.13.2
 RUN R -e "install.packages('remotes', repos = c(CRAN = 'https://cloud.r-project.org'))"
